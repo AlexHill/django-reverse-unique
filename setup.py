@@ -36,5 +36,11 @@ setup(
         'Programming Language :: Python :: 3.6',
     ],
     packages=find_packages(exclude=['tests']),
-    install_requires=['django'],
+    install_requires=[
+        'django',
+        'django-relativity==0.1.4',
+    ],
+    dependency_links=[
+        'https://github.com/AlexHill/django-relativity/tarball/13a3deacd1d7783916e5e0cdd7d3d19abb4076fa#egg=django-relativity-0.1.4',
+    ]
 )

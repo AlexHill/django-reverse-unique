@@ -7,6 +7,8 @@ from django.db.models import Q, F
 from django.utils.translation import get_language
 from reverse_unique import ReverseUnique
 
+from relativity.fields import L
+
 
 def filter_lang():
     return Q(lang=get_language())
@@ -49,7 +51,7 @@ class DefaultTranslationArticle(models.Model):
     active_translation = ReverseUnique(
         "DefaultTranslationArticleTranslation", filters=filter_lang)
     default_translation = ReverseUnique(
-        "DefaultTranslationArticleTranslation", filters=Q(lang=F('article__default_lang')))
+        "DefaultTranslationArticleTranslation", filters=Q(lang=L('default_lang')))
 
     class Meta:
         app_label = 'reverse_unique'

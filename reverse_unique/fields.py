@@ -1,12 +1,9 @@
 import django
 
-try:
-    from django.db.models.fields.related import ReverseSingleRelatedObjectDescriptor as ForwardManyToOneDescriptor
-except ImportError:
-    from django.db.models.fields.related_descriptors import ForwardManyToOneDescriptor
+from django.db.models import Q
+from django.utils.functional import cached_property
 
-from django.db.models.fields.related import ForeignObject
-from django.db import models
+from relativity.fields import Relationship, L
 
 
 if django.VERSION >= (1, 9):
@@ -23,36 +20,36 @@ else:
         return field.rel.to
 
 
-class ReverseUniqueDescriptor(ForwardManyToOneDescriptor):
-    def __set__(self, instance, value):
-        if instance is None:
-            raise AttributeError("%s must be accessed via instance" % self.field.name)
-        setattr(instance, self.cache_name, value)
-        if value is not None and not get_remote_field(self.field).multiple:
-            setattr(value, self.field.related.get_cache_name(), instance)
-
-    def __get__(self, instance, *args, **kwargs):
-        try:
-            return super(ReverseUniqueDescriptor, self).__get__(instance, *args, **kwargs)
-        except get_remote_field_model(self.field).DoesNotExist:
-            setattr(instance, self.cache_name, None)
-            return None
-
-
-class ReverseUnique(ForeignObject):
-    requires_unique_target = False
+class ReverseUnique(Relationship):
 
     def __init__(self, *args, **kwargs):
-        self.filters = kwargs.pop('filters')
+        filters = kwargs.pop('filters')
+
+        def predicate():
+            unique_filters = filters() if callable(filters) else filters
+            fk_filters = Q(**{
+                from_field.attname: L(to_field.attname)
+                for to_field, from_field
+                in self.fk_related_fields
+            })
+            return fk_filters & unique_filters
+
+        kwargs['predicate'] = predicate
         self.through = kwargs.pop('through', None)
-        kwargs['from_fields'] = []
-        kwargs['to_fields'] = []
         kwargs['null'] = True
         kwargs['related_name'] = '+'
-        kwargs['on_delete'] = models.DO_NOTHING
+        kwargs['multiple'] = False
+        kwargs['reverse_multiple'] = False
         super(ReverseUnique, self).__init__(*args, **kwargs)
 
-    def resolve_related_fields(self):
+    def deconstruct(self):
+        name, path, args, kwargs = super(ReverseUnique, self).deconstruct()
+        kwargs["filters"] = kwargs.pop('predicate')
+        kwargs["through"] = self.through
+        return name, path, args, kwargs
+
+    @cached_property
+    def fk_related_fields(self):
         if self.through is None:
             possible_models = [self.model] + [m for m in self.model.__mro__ if hasattr(m, '_meta')]
             possible_targets = [f for f in get_remote_field_model(self)._meta.concrete_fields
@@ -80,7 +77,7 @@ class ReverseUnique(ForeignObject):
             to_fields = [f.name for f in related_field.foreign_related_fields]
         self.to_fields = [f.name for f in related_field.local_related_fields]
         self.from_fields = to_fields
-        return super(ReverseUnique, self).resolve_related_fields()
+        return super(Relationship, self).resolve_related_fields()
 
     def _find_parent_link(self, related_field):
         """
@@ -121,41 +118,3 @@ class ReverseUnique(ForeignObject):
             ancestor_links.append(found_link)
             curr_model = get_remote_field_model(found_link)
         return [self.model._meta.get_ancestor_link(get_remote_field_model(related_field)).name]
-
-    def get_filters(self):
-        if callable(self.filters):
-            return self.filters()
-        else:
-            return self.filters
-
-    def get_extra_restriction(self, where_class, alias, related_alias):
-        remote_model = get_remote_field_model(self)
-        qs = remote_model.objects.filter(self.get_filters()).query
-        my_table = self.model._meta.db_table
-        rel_table = remote_model._meta.db_table
-        illegal_tables = set([t for t in qs.tables if qs.alias_refcount[t] > 0]).difference(
-            set([my_table, rel_table]))
-        if illegal_tables:
-            raise Exception("This field's filters refers illegal tables: %s" % illegal_tables)
-        where = qs.where
-        where.relabel_aliases({my_table: related_alias, rel_table: alias})
-        return where
-
-    def get_extra_descriptor_filter(self, instance):
-        return self.get_filters()
-
-    def get_path_info(self):
-        ret = super(ReverseUnique, self).get_path_info()
-        assert len(ret) == 1
-        return [ret[0]._replace(direct=False)]
-
-    def contribute_to_class(self, cls, name):
-        super(ReverseUnique, self).contribute_to_class(cls, name)
-        setattr(cls, self.name, ReverseUniqueDescriptor(self))
-
-    def deconstruct(self):
-        name, path, args, kwargs = super(ReverseUnique, self).deconstruct()
-        kwargs['filters'] = self.filters
-        if self.through is not None:
-            kwargs['through'] = self.through
-        return name, path, args, kwargs

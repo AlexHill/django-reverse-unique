@@ -142,7 +142,8 @@ class ReverseUniqueTests(TestCase):
                                    from_date=today + datetime.timedelta(days=1))
         self.assertEqual(room1.current_reservation.guest, g1)
         self.assertEqual(room2.current_reservation.guest, g2)
-        self.assertEqual(room3.current_reservation, None)
+        with self.assertRaises(Reservation.DoesNotExist):
+            self.assertEqual(room3.current_reservation, None)
         self.assertQuerysetEqual(
             Room.objects.filter(current_reservation__isnull=True), [room3],
             lambda x: x)
@@ -225,7 +226,7 @@ class InheritanceTests(TestCase):
                 'reverse_unique.FailingChild. Add ReverseUnique to parent instead.'):
             # Unfortunately we get the error only at first query, not at
             # model definition time.
-            FailingChild.objects.filter(rev_uniq__pk__contains=1)
+            FailingChild.objects.filter(rev_uniq__pk__contains=1).first()
 
         class FailingChild2(Parent):
             parent_ptr = models.OneToOneField(
@@ -243,7 +244,7 @@ class InheritanceTests(TestCase):
                 'reverse_unique.FailingChild2. Add ReverseUnique to parent instead.'):
             # The local model doesn't contain parent's id - so can't generate
             # working query...
-            FailingChild2.objects.filter(rel4__id__contains=1)
+            FailingChild2.objects.filter(rel4__id__contains=1).first()
 
     def test_through_parent(self):
         c1 = AnotherChild.objects.create(uniq_field='1')
